@@ -1,0 +1,46 @@
+# name the portage image
+FROM gentoo/portage:latest as portage
+
+# image is based on stage3-amd64-nomultilib
+FROM gentoo/stage3:musl-20220104
+
+# copy the entire portage volume in
+COPY --from=portage /var/db/repos/gentoo /var/db/repos/gentoo
+
+# Reduce dependencies
+RUN \
+        echo USE=\"-fortran -glibc -openmp -llvm -svg -gpg -iconv -nls -pcre -perl threads -webdav X\" >> /etc/portage/make.conf && \
+        echo VIDEO_CARDS="intel" >> /etc/portage/make.conf && \
+        echo MAKEOPTS="-j4" >> /etc/portage/make.conf && \
+        cat /etc/portage/make.conf
+
+# Needed to build certain packages inside a Docker container
+# See https://forums.gentoo.org/viewtopic-p-8602839.html#8602839
+# And since we are in a container already, having no sandbox is reasonable
+RUN \
+	echo FEATURES=\"-sandbox -ipc-sandbox -network-sandbox -pid-sandbox -sandbox -usersandbox\" >> /etc/portage/make.conf
+
+# Required unmasks and USE flags
+RUN \
+        echo dev-libs/openssl bindist >> /etc/portage/package.use/qlcplus && \
+        echo dev-qt/qtnetwork bindist >> /etc/portage/package.use/qlcplus && \
+        echo dev-qt/qtmultimedia  widgets >> /etc/portage/package.use/qlcplus && \
+        echo x11-libs/libxcb xkb >> /etc/portage/package.use/qlcplus && \
+        echo x11-libs/libxkbcommon X >> /etc/portage/package.use/qlcplus && \
+        echo dev-libs/libpcre2 pcre16 >> /etc/portage/package.use/qlcplus
+
+# Fetch the overlay with the live ebuild and accept it via the keywords
+# so we can specify which commit to build
+RUN \
+        emerge -v --jobs=3 app-eselect/eselect-repository dev-vcs/git && \
+	mkdir /etc/portage/repos.conf && \
+        eselect repository enable kripton-overlay && \
+        emerge --sync kripton-overlay && \
+	mkdir -p /etc/portage/package.accept_keywords && \
+	echo =app-misc/qlcplus-4.9999::kripton-overlay > /etc/portage/package.keywords
+
+# emerge it
+RUN \
+	export EGIT_OVERRIDE_REPO_MCALLEGARI_QLCPLUS=https://github.com/kripton/qlcplus && \
+	export EGIT_OVERRIDE_BRANCH_MCALLEGARI_QLCPLUS=fixBuildOnMusl && \
+	emerge -v --job=3 qlcplus
